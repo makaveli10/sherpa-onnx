@@ -82,6 +82,7 @@ class OnnxModel:
         self.encoder = ort.InferenceSession(
             encoder,
             sess_options=self.session_opts,
+            providers=["CUDAExecutionProvider"]
         )
 
         meta = self.encoder.get_modelmeta().custom_metadata_map
@@ -113,6 +114,7 @@ class OnnxModel:
         self.decoder = ort.InferenceSession(
             decoder,
             sess_options=self.session_opts,
+            providers=["CUDAExecutionProvider"],
         )
 
     def run_encoder(
@@ -266,8 +268,12 @@ def main():
     mel = compute_features(args.sound_file)
     model = OnnxModel(args.encoder, args.decoder)
 
+    import time
+    start = time.time()
     n_layer_cross_k, n_layer_cross_v = model.run_encoder(mel)
-
+    print(n_layer_cross_k[0,0,0,:5], n_layer_cross_v[0,0,0,:5])
+    end = time.time()
+    print("encoder: ", end - start)
     if args.language is not None:
         if model.is_multilingual is False and args.language != "en":
             print(f"This model supports only English. Given: {args.language}")
@@ -298,6 +304,9 @@ def main():
 
     tokens = torch.tensor([model.sot_sequence], dtype=torch.int64)
     offset = torch.zeros(1, dtype=torch.int64)
+    
+    start = time.time()
+    print(tokens, tokens.shape)
     logits, n_layer_self_k_cache, n_layer_self_v_cache = model.run_decoder(
         tokens=tokens,
         n_layer_self_k_cache=n_layer_self_k_cache,
@@ -306,6 +315,12 @@ def main():
         n_layer_cross_v=n_layer_cross_v,
         offset=offset,
     )
+    print(tokens.shape)
+    print(n_layer_self_k_cache.shape)
+    print(n_layer_self_v_cache.shape)
+    print(n_layer_cross_k.shape)
+    print(n_layer_cross_k.shape)
+    print(offset.shape)
     offset += len(model.sot_sequence)
     # logits.shape (batch_size, tokens.shape[1], vocab_size)
     logits = logits[0, -1]
@@ -328,10 +343,18 @@ def main():
             n_layer_cross_v=n_layer_cross_v,
             offset=offset,
         )
+        print(tokens.shape)
+        print(n_layer_self_k_cache.shape)
+        print(n_layer_self_v_cache.shape)
+        print(n_layer_cross_k.shape)
+        print(n_layer_cross_k.shape)
+        print(offset.shape)
         offset += 1
         logits = logits[0, -1]
         model.suppress_tokens(logits, is_initial=False)
         max_token_id = logits.argmax(dim=-1)
+    end = time.time()
+    print("decoder: ", end - start)
     token_table = load_tokens(args.tokens)
     s = b""
     for i in results:
